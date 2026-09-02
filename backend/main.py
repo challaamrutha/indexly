@@ -1,5 +1,9 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from pathlib import Path
+import shutil
+
+from videos import VIDEOS
 
 app = FastAPI(
     title="Indexly API",
@@ -7,19 +11,16 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# Allow the Next.js frontend to communicate with the backend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3001",
-    ],
+    allow_origins=["http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+UPLOAD_DIR = Path("uploads")
+UPLOAD_DIR.mkdir(exist_ok=True)
 
 
 @app.get("/")
@@ -39,7 +40,7 @@ def health():
 
 @app.post("/search")
 def search(data: dict):
-    query = data.get("query", "").strip()
+    query = data.get("query", "").strip().lower()
 
     if not query:
         return {
@@ -48,26 +49,33 @@ def search(data: dict):
             "message": "Please enter a search query.",
         }
 
-    sample_results = [
-        {
-            "title": "Football Match Highlights",
-            "timestamp": "00:02:14",
-            "description": "Football match highlights and important moments.",
-        },
-        {
-            "title": "Team Training Session",
-            "timestamp": "00:07:32",
-            "description": "Players practicing passing and shooting drills.",
-        },
-        {
-            "title": "Championship Final",
-            "timestamp": "00:15:48",
-            "description": "A key moment from the championship final.",
-        },
-    ]
+    results = []
+
+    for video in VIDEOS:
+        searchable_text = (
+            video["title"] + " " +
+            video["description"]
+        ).lower()
+
+        if query in searchable_text:
+            results.append(video)
 
     return {
         "query": query,
-        "results": sample_results,
-        "message": f"Found {len(sample_results)} results for: {query}",
+        "results": results,
+        "message": f"Found {len(results)} results for: {query}",
+    }
+
+
+@app.post("/upload")
+async def upload_video(file: UploadFile = File(...)):
+    file_path = UPLOAD_DIR / file.filename
+
+    with file_path.open("wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    return {
+        "message": "Video uploaded successfully",
+        "filename": file.filename,
+        "path": str(file_path),
     }
