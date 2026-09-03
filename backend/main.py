@@ -127,9 +127,14 @@ def search(data: dict):
         results.append(
             {
                 "type": "visual",
-                "title": "Visual match",
+                "title": result[
+                    "title"
+                ],
                 "video_id": result[
                     "video_id"
+                ],
+                "video_url": result[
+                    "video_url"
                 ],
                 "timestamp_seconds": result[
                     "timestamp_seconds"
@@ -239,6 +244,8 @@ async def upload_video(
                     video_path
                 ),
                 video_id=video_id,
+                video_url=video_url,
+                title=original_filename,
                 interval_seconds=5.0,
             )
         )

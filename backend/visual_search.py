@@ -49,6 +49,16 @@ def load_visual_index():
 
             video_id = metadata["video_id"]
 
+            video_url = metadata.get(
+                "video_url",
+                "",
+            )
+
+            title = metadata.get(
+                "title",
+                "Untitled video",
+            )
+
             for frame in metadata.get(
                 "frames",
                 [],
@@ -60,6 +70,14 @@ def load_visual_index():
                 frames.append(
                     {
                         "video_id": video_id,
+                        "video_url": frame.get(
+                            "video_url",
+                            video_url,
+                        ),
+                        "title": frame.get(
+                            "title",
+                            title,
+                        ),
                         "timestamp": frame[
                             "timestamp"
                         ],
@@ -146,6 +164,12 @@ def search_visuals(
             {
                 "video_id": frame[
                     "video_id"
+                ],
+                "video_url": frame[
+                    "video_url"
+                ],
+                "title": frame[
+                    "title"
                 ],
                 "timestamp_seconds": frame[
                     "timestamp"

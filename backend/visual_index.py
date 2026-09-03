@@ -84,6 +84,8 @@ def extract_ocr(image_path: Path) -> str:
 def sample_video_frames(
     video_path: str,
     video_id: str,
+    video_url: str,
+    title: str,
     interval_seconds: float = 5.0,
 ):
     video_file = Path(video_path)
@@ -154,6 +156,8 @@ def sample_video_frames(
         frames.append(
             {
                 "video_id": video_id,
+                "video_url": video_url,
+                "title": title,
                 "timestamp": round(
                     timestamp,
                     3,
@@ -178,6 +182,8 @@ def sample_video_frames(
         json.dump(
             {
                 "video_id": video_id,
+                "video_url": video_url,
+                "title": title,
                 "video_path": str(
                     video_file
                 ),
@@ -194,6 +200,8 @@ def sample_video_frames(
 
     return {
         "video_id": video_id,
+        "video_url": video_url,
+        "title": title,
         "duration": duration,
         "frames": frames,
         "frame_count": len(frames),
