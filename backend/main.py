@@ -59,27 +59,77 @@ def health():
     }
 
 
-@app.post("/search")
-def search(data: dict):
-    query = data.get("query", "").strip()
+def normalize_score(
+    score: float,
+    minimum: float,
+    maximum: float,
+) -> float:
+    if maximum <= minimum:
+        return 0.5
 
-    if not query:
-        return {
-            "results": []
-        }
-
-    transcript_results = search_videos(
-        query=query
+    normalized = (
+        score - minimum
+    ) / (
+        maximum - minimum
     )
 
-    visual_results = search_visuals(
-        query=query
+    return max(
+        0.0,
+        min(
+            1.0,
+            normalized,
+        ),
     )
 
-    results = []
+
+def combine_results(
+    transcript_results,
+    visual_results,
+):
+    combined = []
+
+    transcript_scores = [
+        float(result.get("score", 0.0))
+        for result in transcript_results
+    ]
+
+    visual_scores = [
+        float(result.get("score", 0.0))
+        for result in visual_results
+    ]
+
+    transcript_min = (
+        min(transcript_scores)
+        if transcript_scores
+        else 0.0
+    )
+
+    transcript_max = (
+        max(transcript_scores)
+        if transcript_scores
+        else 1.0
+    )
+
+    visual_min = (
+        min(visual_scores)
+        if visual_scores
+        else 0.0
+    )
+
+    visual_max = (
+        max(visual_scores)
+        if visual_scores
+        else 1.0
+    )
 
     for result in transcript_results:
-        results.append(
+        normalized_score = normalize_score(
+            float(result.get("score", 0.0)),
+            transcript_min,
+            transcript_max,
+        )
+
+        combined.append(
             {
                 "type": "transcript",
                 "title": result["title"],
@@ -98,33 +148,61 @@ def search(data: dict):
                 "description": result[
                     "description"
                 ],
-                "score": result[
-                    "score"
-                ],
+                "score": round(
+                    normalized_score,
+                    4,
+                ),
+                "speech_score": round(
+                    normalized_score,
+                    4,
+                ),
+                "visual_score": 0.0,
+                "ocr_score": 0.0,
             }
         )
 
     for result in visual_results:
-        image_path = Path(
-            result["image_path"]
+        normalized_visual_score = (
+            normalize_score(
+                float(
+                    result.get(
+                        "visual_score",
+                        result.get(
+                            "score",
+                            0.0,
+                        ),
+                    )
+                ),
+                visual_min,
+                visual_max,
+            )
         )
 
-        try:
-            relative_path = (
-                image_path.relative_to(
-                    FRAMES_DIR
-                )
+        ocr_score = float(
+            result.get(
+                "ocr_score",
+                0.0,
             )
+        )
 
-            thumbnail_url = (
-                "/visual-frames/"
-                + str(relative_path)
+        visual_score = float(
+            result.get(
+                "visual_score",
+                result.get(
+                    "score",
+                    0.0,
+                ),
             )
+        )
 
-        except ValueError:
-            thumbnail_url = ""
+        combined_visual_score = (
+            0.75
+            * normalized_visual_score
+            + 0.25
+            * ocr_score
+        )
 
-        results.append(
+        combined.append(
             {
                 "type": "visual",
                 "title": result[
@@ -139,12 +217,10 @@ def search(data: dict):
                 "timestamp_seconds": result[
                     "timestamp_seconds"
                 ],
-                "timestamp": (
-                    format_timestamp(
-                        result[
-                            "timestamp_seconds"
-                        ]
-                    )
+                "timestamp": format_timestamp(
+                    result[
+                        "timestamp_seconds"
+                    ]
                 ),
                 "start": result[
                     "timestamp_seconds"
@@ -156,23 +232,90 @@ def search(data: dict):
                     "ocr_text"
                 ],
                 "thumbnail_url": (
-                    thumbnail_url
+                    build_thumbnail_url(
+                        result[
+                            "image_path"
+                        ]
+                    )
                 ),
-                "score": result[
-                    "score"
-                ],
+                "score": round(
+                    combined_visual_score,
+                    4,
+                ),
+                "speech_score": 0.0,
+                "visual_score": round(
+                    normalized_visual_score,
+                    4,
+                ),
+                "ocr_score": round(
+                    ocr_score,
+                    4,
+                ),
             }
         )
 
-    results.sort(
+    combined.sort(
         key=lambda result: result[
             "score"
         ],
         reverse=True,
     )
 
+    return combined
+
+
+def build_thumbnail_url(
+    image_path: str,
+) -> str:
+    image_path = Path(
+        image_path
+    )
+
+    try:
+        relative_path = (
+            image_path.relative_to(
+                FRAMES_DIR
+            )
+        )
+
+        return (
+            "/visual-frames/"
+            + str(relative_path)
+        )
+
+    except ValueError:
+        return ""
+
+
+@app.post("/search")
+def search(data: dict):
+    query = data.get(
+        "query",
+        "",
+    ).strip()
+
+    if not query:
+        return {
+            "results": []
+        }
+
+    transcript_results = search_videos(
+        query=query
+    )
+
+    visual_results = search_visuals(
+        query=query
+    )
+
+    results = combine_results(
+        transcript_results,
+        visual_results,
+    )
+
     return {
-        "results": results
+        "query": query,
+        "results": results,
+        "total": len(results),
     }
 
 
