@@ -2,9 +2,29 @@ from pathlib import Path
 import json
 import re
 
+import numpy as np
+import torch
+from transformers import CLIPModel, CLIPProcessor
+
 
 BASE_DIR = Path(__file__).resolve().parent
 FRAMES_DIR = BASE_DIR / "visual_frames"
+
+CLIP_MODEL_NAME = "openai/clip-vit-base-patch32"
+
+print("Loading CLIP search model...")
+
+clip_processor = CLIPProcessor.from_pretrained(
+    CLIP_MODEL_NAME
+)
+
+clip_model = CLIPModel.from_pretrained(
+    CLIP_MODEL_NAME
+)
+
+clip_model.eval()
+
+print("CLIP search model ready.")
 
 
 def normalize_text(text: str) -> str:
@@ -20,6 +40,28 @@ def tokenize(text: str):
             normalize_text(text),
         )
     )
+
+
+def create_text_embedding(
+    query: str,
+):
+    inputs = clip_processor(
+        text=query,
+        return_tensors="pt",
+        padding=True,
+    )
+
+    with torch.no_grad():
+        features = clip_model.get_text_features(
+            **inputs
+        )
+
+    features = features / features.norm(
+        dim=-1,
+        keepdim=True,
+    )
+
+    return features[0].cpu().numpy()
 
 
 def load_visual_index():
@@ -63,10 +105,6 @@ def load_visual_index():
                 "frames",
                 [],
             ):
-                image_path = Path(
-                    frame["image_path"]
-                )
-
                 frames.append(
                     {
                         "video_id": video_id,
@@ -81,12 +119,16 @@ def load_visual_index():
                         "timestamp": frame[
                             "timestamp"
                         ],
-                        "image_path": str(
-                            image_path
-                        ),
+                        "image_path": frame[
+                            "image_path"
+                        ],
                         "ocr_text": frame.get(
                             "ocr_text",
                             "",
+                        ),
+                        "image_embedding": frame.get(
+                            "image_embedding",
+                            [],
                         ),
                     }
                 )
@@ -115,6 +157,10 @@ def search_visuals(
     if not frames:
         return []
 
+    query_embedding = create_text_embedding(
+        query
+    )
+
     normalized_query = normalize_text(
         query
     )
@@ -124,10 +170,24 @@ def search_visuals(
     results = []
 
     for frame in frames:
-        ocr_text = frame["ocr_text"]
+        image_embedding = frame[
+            "image_embedding"
+        ]
 
-        if not ocr_text:
+        if not image_embedding:
             continue
+
+        visual_score = float(
+            np.dot(
+                query_embedding,
+                np.array(
+                    image_embedding,
+                    dtype=np.float32,
+                ),
+            )
+        )
+
+        ocr_text = frame["ocr_text"]
 
         normalized_ocr = normalize_text(
             ocr_text
@@ -138,7 +198,8 @@ def search_visuals(
         )
 
         exact_phrase = (
-            normalized_query
+            bool(ocr_text)
+            and normalized_query
             in normalized_ocr
         )
 
@@ -152,12 +213,17 @@ def search_visuals(
             else 0.0
         )
 
-        if exact_phrase:
-            score = 1.0
-        else:
-            score = overlap
+        ocr_score = overlap
 
-        if score <= 0:
+        if exact_phrase:
+            ocr_score = 1.0
+
+        combined_score = (
+            0.75 * visual_score
+            + 0.25 * ocr_score
+        )
+
+        if combined_score <= 0:
             continue
 
         results.append(
@@ -178,8 +244,16 @@ def search_visuals(
                     "image_path"
                 ],
                 "ocr_text": ocr_text,
+                "visual_score": round(
+                    visual_score,
+                    4,
+                ),
+                "ocr_score": round(
+                    ocr_score,
+                    4,
+                ),
                 "score": round(
-                    score,
+                    combined_score,
                     4,
                 ),
             }

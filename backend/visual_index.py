@@ -4,13 +4,32 @@ import json
 import math
 
 import pytesseract
+import torch
 from PIL import Image
+from transformers import CLIPModel, CLIPProcessor
 
 
 BASE_DIR = Path(__file__).resolve().parent
 
 FRAMES_DIR = BASE_DIR / "visual_frames"
 FRAMES_DIR.mkdir(exist_ok=True)
+
+
+CLIP_MODEL_NAME = "openai/clip-vit-base-patch32"
+
+print("Loading CLIP vision model...")
+
+clip_processor = CLIPProcessor.from_pretrained(
+    CLIP_MODEL_NAME
+)
+
+clip_model = CLIPModel.from_pretrained(
+    CLIP_MODEL_NAME
+)
+
+clip_model.eval()
+
+print("CLIP vision model ready.")
 
 
 def get_video_duration(video_path: str) -> float:
@@ -79,6 +98,38 @@ def extract_ocr(image_path: Path) -> str:
             f"OCR failed for {image_path}: {error}"
         )
         return ""
+
+
+def create_image_embedding(
+    image_path: Path,
+):
+    try:
+        with Image.open(image_path) as image:
+            image = image.convert("RGB")
+
+            inputs = clip_processor(
+                images=image,
+                return_tensors="pt",
+            )
+
+        with torch.no_grad():
+            features = clip_model.get_image_features(
+                **inputs
+            )
+
+        features = features / features.norm(
+            dim=-1,
+            keepdim=True,
+        )
+
+        return features[0].cpu().tolist()
+
+    except Exception as error:
+        print(
+            f"Vision embedding failed for "
+            f"{image_path}: {error}"
+        )
+        return []
 
 
 def sample_video_frames(
@@ -153,6 +204,17 @@ def sample_video_frames(
             image_path
         )
 
+        print(
+            f"Creating visual embedding "
+            f"at {timestamp:.1f}s"
+        )
+
+        image_embedding = (
+            create_image_embedding(
+                image_path
+            )
+        )
+
         frames.append(
             {
                 "video_id": video_id,
@@ -166,6 +228,7 @@ def sample_video_frames(
                     image_path
                 ),
                 "ocr_text": ocr_text,
+                "image_embedding": image_embedding,
             }
         )
 
