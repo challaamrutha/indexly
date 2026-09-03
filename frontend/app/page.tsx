@@ -1,284 +1,480 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+
+const API = "http://127.0.0.1:8000";
 
 type SearchResult = {
+  type: "transcript" | "visual";
   title: string;
   timestamp: string;
-  description: string;
+  start: number;
+  end?: number;
+  description?: string;
   video_url?: string;
+  thumbnail_url?: string;
+  score?: number;
 };
 
-export default function Home() {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [message, setMessage] = useState("");
-  const [loading, setLoading] = useState(false);
+type UploadedVideo = {
+  id: string;
+  name: string;
+  url: string;
+};
 
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [uploadMessage, setUploadMessage] = useState("");
-  const [uploading, setUploading] = useState(false);
+function getVideoUrl(path?: string) {
+  if (!path) return "";
 
-  async function handleSearch() {
-    if (!query.trim()) {
-      setMessage("Please enter a search query.");
-      setResults([]);
-      return;
-    }
-
-    setLoading(true);
-    setMessage("");
-
-    try {
-      const response = await fetch("http://127.0.0.1:8000/search", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          query: query,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error("Search request failed");
-      }
-
-      const data = await response.json();
-
-      setResults(data.results || []);
-      setMessage(data.message || "");
-    } catch (error) {
-      console.error(error);
-      setMessage("Failed to connect to the backend.");
-      setResults([]);
-    } finally {
-      setLoading(false);
-    }
+  if (
+    path.startsWith("http://") ||
+    path.startsWith("https://")
+  ) {
+    return path;
   }
 
-  async function handleUpload() {
-    if (!selectedFile) {
-      setUploadMessage("Please select a video first.");
-      return;
-    }
+  return `${API}${path}`;
+}
 
+export default function Home() {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  const [videos, setVideos] = useState<
+    UploadedVideo[]
+  >([]);
+
+  const [activeVideo, setActiveVideo] =
+    useState<UploadedVideo | null>(null);
+
+  const [query, setQuery] = useState("");
+
+  const [results, setResults] = useState<
+    SearchResult[]
+  >([]);
+
+  const [uploading, setUploading] =
+    useState(false);
+
+  const [searching, setSearching] =
+    useState(false);
+
+  const [message, setMessage] =
+    useState("");
+
+  async function uploadVideo(file: File) {
     setUploading(true);
-    setUploadMessage("");
+    setMessage("");
+    setResults([]);
 
     try {
       const formData = new FormData();
-      formData.append("file", selectedFile);
 
-      const response = await fetch("http://127.0.0.1:8000/upload", {
-        method: "POST",
-        body: formData,
-      });
+      formData.append(
+        "file",
+        file
+      );
+
+      const response = await fetch(
+        `${API}/upload`,
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
 
       if (!response.ok) {
-        throw new Error("Upload failed");
+        throw new Error(
+          "Upload failed"
+        );
       }
 
-      const data = await response.json();
+      const data =
+        await response.json();
 
-      setUploadMessage(
-        `✅ ${data.filename} uploaded successfully!`
+      if (data.error) {
+        throw new Error(
+          data.error
+        );
+      }
+
+      const video: UploadedVideo = {
+        id: data.video_id,
+        name:
+          data.filename ||
+          file.name,
+        url: getVideoUrl(
+          data.video_url ||
+            data.path
+        ),
+      };
+
+      setVideos((current) => [
+        ...current,
+        video,
+      ]);
+
+      setActiveVideo(video);
+
+      setMessage(
+        `${video.name} indexed successfully.`
       );
-      setSelectedFile(null);
     } catch (error) {
       console.error(error);
-      setUploadMessage("❌ Upload failed. Please try again.");
+
+      setMessage(
+        "Could not upload and index the video."
+      );
     } finally {
       setUploading(false);
     }
   }
 
+  async function searchVideos() {
+    const trimmedQuery =
+      query.trim();
+
+    if (!trimmedQuery) {
+      setResults([]);
+      setMessage("");
+      return;
+    }
+
+    if (videos.length === 0) {
+      setMessage(
+        "Upload a video first."
+      );
+      return;
+    }
+
+    setSearching(true);
+    setMessage("");
+
+    try {
+      const response =
+        await fetch(
+          `${API}/search`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              query: trimmedQuery,
+            }),
+          }
+        );
+
+      if (!response.ok) {
+        throw new Error(
+          "Search failed"
+        );
+      }
+
+      const data =
+        await response.json();
+
+      setResults(
+        Array.isArray(
+          data.results
+        )
+          ? data.results
+          : []
+      );
+
+      if (
+        !Array.isArray(
+          data.results
+        ) ||
+        data.results.length === 0
+      ) {
+        setMessage(
+          "No matching moments found."
+        );
+      }
+    } catch (error) {
+      console.error(error);
+
+      setMessage(
+        "Search failed. Please try again."
+      );
+
+      setResults([]);
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  function openResult(
+    result: SearchResult
+  ) {
+    const matchingVideo =
+      videos.find(
+        (video) =>
+          result.video_url &&
+          video.url ===
+            getVideoUrl(
+              result.video_url
+            )
+      );
+
+    if (
+      matchingVideo &&
+      (!activeVideo ||
+        activeVideo.url !==
+          matchingVideo.url)
+    ) {
+      setActiveVideo(
+        matchingVideo
+      );
+
+      setTimeout(() => {
+        seekVideo(
+          result.start
+        );
+      }, 150);
+
+      return;
+    }
+
+    seekVideo(
+      result.start
+    );
+  }
+
+  function seekVideo(
+    seconds: number
+  ) {
+    const player =
+      videoRef.current;
+
+    if (!player) return;
+
+    player.currentTime =
+      Math.max(
+        0,
+        seconds
+      );
+
+    player
+      .play()
+      .catch(() => {
+        // Browser may require manual play.
+      });
+  }
+
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        padding: "40px 20px",
-        fontFamily: "Arial, sans-serif",
-        background: "#f5f5f5",
-      }}
-    >
-      <div
-        style={{
-          maxWidth: "900px",
-          margin: "0 auto",
-        }}
-      >
-        <h1
-          style={{
-            fontSize: "42px",
-            marginBottom: "8px",
-          }}
-        >
-          Indexly
-        </h1>
+    <main className="page">
+      <div className="container">
+        <header className="header">
+          <div>
+            <h1>Indexly</h1>
 
-        <p
-          style={{
-            color: "#666",
-            marginBottom: "35px",
-          }}
-        >
-          AI-powered search for your video library
-        </p>
-
-        {/* Upload section */}
-        <section
-          style={{
-            background: "white",
-            padding: "25px",
-            borderRadius: "12px",
-            marginBottom: "30px",
-            boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
-          }}
-        >
-          <h2>Upload a Video</h2>
-
-          <input
-            type="file"
-            accept="video/*"
-            onChange={(event) => {
-              const file = event.target.files?.[0] || null;
-              setSelectedFile(file);
-              setUploadMessage("");
-            }}
-            style={{
-              marginTop: "10px",
-              marginBottom: "15px",
-            }}
-          />
-
-          {selectedFile && (
             <p>
-              Selected: <strong>{selectedFile.name}</strong>
+              Search inside your
+              videos.
             </p>
-          )}
+          </div>
 
-          <button
-            onClick={handleUpload}
-            disabled={uploading}
-            style={{
-              padding: "10px 18px",
-              border: "none",
-              borderRadius: "8px",
-              background: "#111",
-              color: "white",
-              cursor: uploading ? "not-allowed" : "pointer",
-              marginTop: "5px",
-            }}
-          >
-            {uploading ? "Uploading..." : "Upload Video"}
-          </button>
+          <label className="upload-button">
+            {uploading
+              ? "Indexing..."
+              : "Upload Video"}
 
-          {uploadMessage && (
-            <p style={{ marginTop: "15px" }}>{uploadMessage}</p>
-          )}
-        </section>
+            <input
+              type="file"
+              accept="video/*"
+              hidden
+              disabled={uploading}
+              onChange={(
+                event
+              ) => {
+                const file =
+                  event.target
+                    .files?.[0];
 
-        {/* Search section */}
-        <section
-          style={{
-            background: "white",
-            padding: "25px",
-            borderRadius: "12px",
-            boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
-          }}
-        >
-          <h2>Search Videos</h2>
+                if (file) {
+                  uploadVideo(
+                    file
+                  );
+                }
 
-          <div
-            style={{
-              display: "flex",
-              gap: "10px",
-              marginTop: "15px",
-            }}
-          >
+                event.target.value =
+                  "";
+              }}
+            />
+          </label>
+        </header>
+
+        {videos.length > 0 && (
+          <section className="video-library">
+            <h2>
+              Video Library
+            </h2>
+
+            <div className="video-list">
+              {videos.map(
+                (video) => (
+                  <button
+                    key={
+                      video.id
+                    }
+                    className={
+                      activeVideo?.id ===
+                      video.id
+                        ? "video-item active"
+                        : "video-item"
+                    }
+                    onClick={() =>
+                      setActiveVideo(
+                        video
+                      )
+                    }
+                  >
+                    {video.name}
+                  </button>
+                )
+              )}
+            </div>
+          </section>
+        )}
+
+        <section className="search-section">
+          <div className="search-box">
             <input
               type="text"
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  handleSearch();
+              placeholder="Search your videos..."
+              onChange={(
+                event
+              ) =>
+                setQuery(
+                  event.target
+                    .value
+                )
+              }
+              onKeyDown={(
+                event
+              ) => {
+                if (
+                  event.key ===
+                  "Enter"
+                ) {
+                  searchVideos();
                 }
-              }}
-              placeholder="Search for basketball, coach, football..."
-              style={{
-                flex: 1,
-                padding: "12px",
-                border: "1px solid #ccc",
-                borderRadius: "8px",
-                fontSize: "16px",
               }}
             />
 
             <button
-              onClick={handleSearch}
-              disabled={loading}
-              style={{
-                padding: "12px 20px",
-                border: "none",
-                borderRadius: "8px",
-                background: "#111",
-                color: "white",
-                cursor: loading ? "not-allowed" : "pointer",
-              }}
+              onClick={
+                searchVideos
+              }
+              disabled={
+                searching ||
+                videos.length ===
+                  0
+              }
             >
-              {loading ? "Searching..." : "Search"}
+              {searching
+                ? "Searching..."
+                : "Search"}
             </button>
           </div>
-
-          {message && (
-            <p
-              style={{
-                marginTop: "20px",
-                color: "#555",
-              }}
-            >
-              {message}
-            </p>
-          )}
-
-          <div style={{ marginTop: "20px" }}>
-            {results.map((result, index) => (
-              <div
-                key={index}
-                style={{
-                  border: "1px solid #ddd",
-                  borderRadius: "10px",
-                  padding: "18px",
-                  marginBottom: "12px",
-                }}
-              >
-                <h3 style={{ marginBottom: "8px" }}>
-                  {result.title}
-                </h3>
-
-                <p>
-                  <strong>Timestamp:</strong> {result.timestamp}
-                </p>
-
-                <p style={{ color: "#555" }}>
-                  {result.description}
-                </p>
-
-                {result.video_url && (
-                  <a
-                    href={result.video_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    Open Video
-                  </a>
-                )}
-              </div>
-            ))}
-          </div>
         </section>
+
+        {message && (
+          <p className="message">
+            {message}
+          </p>
+        )}
+
+        {activeVideo && (
+          <section className="video-section">
+            <div className="video-header">
+              <h2>
+                {activeVideo.name}
+              </h2>
+            </div>
+
+            <video
+              ref={videoRef}
+              className="video-player"
+              src={
+                activeVideo.url
+              }
+              controls
+              preload="metadata"
+            />
+          </section>
+        )}
+
+        {results.length > 0 && (
+          <section className="results-section">
+            <h2>
+              Search Results
+            </h2>
+
+            <div className="results">
+              {results.map(
+                (
+                  result,
+                  index
+                ) => (
+                  <button
+                    className="result-card"
+                    key={`${result.video_url}-${result.timestamp}-${index}`}
+                    onClick={() =>
+                      openResult(
+                        result
+                      )
+                    }
+                  >
+                    {result.thumbnail_url ? (
+                      <img
+                        className="result-thumbnail"
+                        src={getVideoUrl(
+                          result.thumbnail_url
+                        )}
+                        alt=""
+                      />
+                    ) : (
+                      <div className="result-thumbnail placeholder">
+                        {result.type ===
+                        "visual"
+                          ? "VISUAL"
+                          : "VIDEO"}
+                      </div>
+                    )}
+
+                    <div className="result-time">
+                      {result.timestamp}
+                    </div>
+
+                    <div className="result-content">
+                      <div className="result-type">
+                        {result.type ===
+                        "visual"
+                          ? "Visual match"
+                          : "Transcript match"}
+                      </div>
+
+                      <h3>
+                        {result.title}
+                      </h3>
+
+                      {result.description && (
+                        <p>
+                          {
+                            result.description
+                          }
+                        </p>
+                      )}
+                    </div>
+                  </button>
+                )
+              )}
+            </div>
+          </section>
+        )}
       </div>
     </main>
   );
