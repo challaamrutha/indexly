@@ -8,12 +8,17 @@ type SearchResult = {
   type: "transcript" | "visual";
   title: string;
   timestamp: string;
+  timestamp_seconds?: number;
   start: number;
   end?: number;
   description?: string;
+  summary?: string;
   video_url?: string;
   thumbnail_url?: string;
   score?: number;
+  speech_score?: number;
+  visual_score?: number;
+  ocr_score?: number;
 };
 
 type UploadedVideo = {
@@ -35,21 +40,29 @@ function getVideoUrl(path?: string) {
   return `${API}${path}`;
 }
 
-export default function Home() {
-  const videoRef = useRef<HTMLVideoElement>(null);
+function formatScore(score?: number) {
+  if (score === undefined) {
+    return "";
+  }
 
-  const [videos, setVideos] = useState<
-    UploadedVideo[]
-  >([]);
+  return `${Math.round(score * 100)}% match`;
+}
+
+export default function Home() {
+  const videoRef =
+    useRef<HTMLVideoElement>(null);
+
+  const [videos, setVideos] =
+    useState<UploadedVideo[]>([]);
 
   const [activeVideo, setActiveVideo] =
     useState<UploadedVideo | null>(null);
 
-  const [query, setQuery] = useState("");
+  const [query, setQuery] =
+    useState("");
 
-  const [results, setResults] = useState<
-    SearchResult[]
-  >([]);
+  const [results, setResults] =
+    useState<SearchResult[]>([]);
 
   const [uploading, setUploading] =
     useState(false);
@@ -66,20 +79,22 @@ export default function Home() {
     setResults([]);
 
     try {
-      const formData = new FormData();
+      const formData =
+        new FormData();
 
       formData.append(
         "file",
         file
       );
 
-      const response = await fetch(
-        `${API}/upload`,
-        {
-          method: "POST",
-          body: formData,
-        }
-      );
+      const response =
+        await fetch(
+          `${API}/upload`,
+          {
+            method: "POST",
+            body: formData,
+          }
+        );
 
       if (!response.ok) {
         throw new Error(
@@ -107,10 +122,12 @@ export default function Home() {
         ),
       };
 
-      setVideos((current) => [
-        ...current,
-        video,
-      ]);
+      setVideos(
+        (current) => [
+          ...current,
+          video,
+        ]
+      );
 
       setActiveVideo(video);
 
@@ -159,7 +176,8 @@ export default function Home() {
                 "application/json",
             },
             body: JSON.stringify({
-              query: trimmedQuery,
+              query:
+                trimmedQuery,
             }),
           }
         );
@@ -173,19 +191,20 @@ export default function Home() {
       const data =
         await response.json();
 
-      setResults(
+      const searchResults =
         Array.isArray(
           data.results
         )
           ? data.results
-          : []
+          : [];
+
+      setResults(
+        searchResults
       );
 
       if (
-        !Array.isArray(
-          data.results
-        ) ||
-        data.results.length === 0
+        searchResults.length ===
+        0
       ) {
         setMessage(
           "No matching moments found."
@@ -219,9 +238,8 @@ export default function Home() {
 
     if (
       matchingVideo &&
-      (!activeVideo ||
-        activeVideo.url !==
-          matchingVideo.url)
+      activeVideo?.url !==
+        matchingVideo.url
     ) {
       setActiveVideo(
         matchingVideo
@@ -247,7 +265,9 @@ export default function Home() {
     const player =
       videoRef.current;
 
-    if (!player) return;
+    if (!player) {
+      return;
+    }
 
     player.currentTime =
       Math.max(
@@ -255,11 +275,9 @@ export default function Home() {
         seconds
       );
 
-    player
-      .play()
-      .catch(() => {
-        // Browser may require manual play.
-      });
+    player.play().catch(() => {
+      // Browser may require manual play.
+    });
   }
 
   return (
@@ -267,11 +285,12 @@ export default function Home() {
       <div className="container">
         <header className="header">
           <div>
-            <h1>Indexly</h1>
+            <h1>
+              Indexly
+            </h1>
 
             <p>
-              Search inside your
-              videos.
+              Search inside your videos.
             </p>
           </div>
 
@@ -285,9 +304,7 @@ export default function Home() {
               accept="video/*"
               hidden
               disabled={uploading}
-              onChange={(
-                event
-              ) => {
+              onChange={(event) => {
                 const file =
                   event.target
                     .files?.[0];
@@ -315,9 +332,7 @@ export default function Home() {
               {videos.map(
                 (video) => (
                   <button
-                    key={
-                      video.id
-                    }
+                    key={video.id}
                     className={
                       activeVideo?.id ===
                       video.id
@@ -344,17 +359,12 @@ export default function Home() {
               type="text"
               value={query}
               placeholder="Search your videos..."
-              onChange={(
-                event
-              ) =>
+              onChange={(event) =>
                 setQuery(
-                  event.target
-                    .value
+                  event.target.value
                 )
               }
-              onKeyDown={(
-                event
-              ) => {
+              onKeyDown={(event) => {
                 if (
                   event.key ===
                   "Enter"
@@ -409,9 +419,17 @@ export default function Home() {
 
         {results.length > 0 && (
           <section className="results-section">
-            <h2>
-              Search Results
-            </h2>
+            <div className="results-header">
+              <div>
+                <h2>
+                  Search Results
+                </h2>
+
+                <p>
+                  {results.length} matching moments
+                </p>
+              </div>
+            </div>
 
             <div className="results">
               {results.map(
@@ -446,28 +464,76 @@ export default function Home() {
                     )}
 
                     <div className="result-time">
-                      {result.timestamp}
+                      {
+                        result.timestamp
+                      }
                     </div>
 
                     <div className="result-content">
-                      <div className="result-type">
-                        {result.type ===
-                        "visual"
-                          ? "Visual match"
-                          : "Transcript match"}
+                      <div className="result-topline">
+                        <span className="result-type">
+                          {result.type ===
+                          "visual"
+                            ? "Visual match"
+                            : "Transcript match"}
+                        </span>
+
+                        {result.score !==
+                          undefined && (
+                          <span className="result-score">
+                            {formatScore(
+                              result.score
+                            )}
+                          </span>
+                        )}
                       </div>
 
                       <h3>
                         {result.title}
                       </h3>
 
-                      {result.description && (
-                        <p>
-                          {
-                            result.description
-                          }
+                      {result.summary && (
+                        <p className="result-summary">
+                          {result.summary}
                         </p>
                       )}
+
+                      {result.description &&
+                        result.description !==
+                          result.summary && (
+                          <p className="result-description">
+                            {result.description}
+                          </p>
+                        )}
+
+                      <div className="result-signals">
+                        {result.speech_score !==
+                          undefined &&
+                          result.speech_score >
+                            0 && (
+                            <span>
+                              Speech
+                            </span>
+                          )}
+
+                        {result.visual_score !==
+                          undefined &&
+                          result.visual_score >
+                            0 && (
+                            <span>
+                              Vision
+                            </span>
+                          )}
+
+                        {result.ocr_score !==
+                          undefined &&
+                          result.ocr_score >
+                            0 && (
+                            <span>
+                              OCR
+                            </span>
+                          )}
+                      </div>
                     </div>
                   </button>
                 )
