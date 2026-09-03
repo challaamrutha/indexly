@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from search_engine import index_video, search_videos
 from visual_index import sample_video_frames
 from visual_search import search_visuals
+from summarizer import summarize_result
 
 
 app = FastAPI()
@@ -24,7 +25,6 @@ app.add_middleware(
 
 
 BASE_DIR = Path(__file__).resolve().parent
-
 UPLOAD_DIR = BASE_DIR / "uploads"
 FRAMES_DIR = BASE_DIR / "visual_frames"
 
@@ -75,11 +75,27 @@ def normalize_score(
 
     return max(
         0.0,
-        min(
-            1.0,
-            normalized,
-        ),
+        min(1.0, normalized),
     )
+
+
+def build_thumbnail_url(
+    image_path: str,
+) -> str:
+    image_path = Path(image_path)
+
+    try:
+        relative_path = image_path.relative_to(
+            FRAMES_DIR
+        )
+
+        return (
+            "/visual-frames/"
+            + str(relative_path)
+        )
+
+    except ValueError:
+        return ""
 
 
 def combine_results(
@@ -89,12 +105,22 @@ def combine_results(
     combined = []
 
     transcript_scores = [
-        float(result.get("score", 0.0))
+        float(
+            result.get(
+                "score",
+                0.0,
+            )
+        )
         for result in transcript_results
     ]
 
     visual_scores = [
-        float(result.get("score", 0.0))
+        float(
+            result.get(
+                "score",
+                0.0,
+            )
+        )
         for result in visual_results
     ]
 
@@ -124,7 +150,12 @@ def combine_results(
 
     for result in transcript_results:
         normalized_score = normalize_score(
-            float(result.get("score", 0.0)),
+            float(
+                result.get(
+                    "score",
+                    0.0,
+                )
+            ),
             transcript_min,
             transcript_max,
         )
@@ -132,66 +163,73 @@ def combine_results(
         combined.append(
             {
                 "type": "transcript",
-                "title": result["title"],
+
+                "title": result[
+                    "title"
+                ],
+
                 "video_url": result[
                     "video_url"
                 ],
+
                 "timestamp": result[
                     "timestamp"
                 ],
+
                 "start": result[
                     "start"
                 ],
+
                 "end": result[
                     "end"
                 ],
+
                 "description": result[
                     "description"
                 ],
+
+                "summary": summarize_result(
+                    "transcript",
+                    result[
+                        "description"
+                    ],
+                ),
+
                 "score": round(
                     normalized_score,
                     4,
                 ),
+
                 "speech_score": round(
                     normalized_score,
                     4,
                 ),
+
                 "visual_score": 0.0,
+
                 "ocr_score": 0.0,
             }
         )
 
     for result in visual_results:
-        normalized_visual_score = (
-            normalize_score(
-                float(
+        normalized_visual_score = normalize_score(
+            float(
+                result.get(
+                    "visual_score",
                     result.get(
-                        "visual_score",
-                        result.get(
-                            "score",
-                            0.0,
-                        ),
-                    )
-                ),
-                visual_min,
-                visual_max,
-            )
+                        "score",
+                        0.0,
+                    ),
+                )
+            ),
+            visual_min,
+            visual_max,
         )
 
         ocr_score = float(
             result.get(
                 "ocr_score",
                 0.0,
-            )
-        )
-
-        visual_score = float(
-            result.get(
-                "visual_score",
-                result.get(
-                    "score",
-                    0.0,
-                ),
             )
         )
 
@@ -205,48 +243,68 @@ def combine_results(
         combined.append(
             {
                 "type": "visual",
+
                 "title": result[
                     "title"
                 ],
+
                 "video_id": result[
                     "video_id"
                 ],
+
                 "video_url": result[
                     "video_url"
                 ],
+
                 "timestamp_seconds": result[
                     "timestamp_seconds"
                 ],
+
                 "timestamp": format_timestamp(
                     result[
                         "timestamp_seconds"
                     ]
                 ),
+
                 "start": result[
                     "timestamp_seconds"
                 ],
+
                 "end": result[
                     "timestamp_seconds"
                 ],
-                "description": result[
-                    "ocr_text"
-                ],
-                "thumbnail_url": (
-                    build_thumbnail_url(
-                        result[
-                            "image_path"
-                        ]
-                    )
+
+                "description": result.get(
+                    "ocr_text",
+                    "",
                 ),
+
+                "summary": summarize_result(
+                    "visual",
+                    result.get(
+                        "ocr_text",
+                        "",
+                    ),
+                ),
+
+                "thumbnail_url": build_thumbnail_url(
+                    result[
+                        "image_path"
+                    ]
+                ),
+
                 "score": round(
                     combined_visual_score,
                     4,
                 ),
+
                 "speech_score": 0.0,
+
                 "visual_score": round(
                     normalized_visual_score,
                     4,
                 ),
+
                 "ocr_score": round(
                     ocr_score,
                     4,
@@ -262,29 +320,6 @@ def combine_results(
     )
 
     return combined
-
-
-def build_thumbnail_url(
-    image_path: str,
-) -> str:
-    image_path = Path(
-        image_path
-    )
-
-    try:
-        relative_path = (
-            image_path.relative_to(
-                FRAMES_DIR
-            )
-        )
-
-        return (
-            "/visual-frames/"
-            + str(relative_path)
-        )
-
-    except ValueError:
-        return ""
 
 
 @app.post("/search")
@@ -357,8 +392,7 @@ async def upload_video(
 
     print("=" * 60)
     print(
-        f"UPLOADED: "
-        f"{original_filename}"
+        f"UPLOADED: {original_filename}"
     )
     print(
         f"VIDEO ID: {video_id}"
@@ -381,16 +415,14 @@ async def upload_video(
         print("CREATING VISUAL INDEX")
         print("=" * 60)
 
-        visual_result = (
-            sample_video_frames(
-                video_path=str(
-                    video_path
-                ),
-                video_id=video_id,
-                video_url=video_url,
-                title=original_filename,
-                interval_seconds=5.0,
-            )
+        visual_result = sample_video_frames(
+            video_path=str(
+                video_path
+            ),
+            video_id=video_id,
+            video_url=video_url,
+            title=original_filename,
+            interval_seconds=5.0,
         )
 
         print(
@@ -412,34 +444,37 @@ async def upload_video(
 
     return {
         "message": (
-            "Video uploaded and "
-            "indexed successfully"
+            "Video uploaded and indexed successfully"
         ),
+
         "video_id": video_id,
+
         "filename": original_filename,
+
         "path": video_url,
+
         "video_url": video_url,
+
         "duration": transcript_result[
             "duration"
         ],
+
         "language": transcript_result[
             "language"
         ],
-        "segments_indexed": (
-            transcript_result[
-                "segments_indexed"
-            ]
-        ),
-        "visual_frames_indexed": (
-            visual_result[
-                "frame_count"
-            ]
-        ),
+
+        "segments_indexed": transcript_result[
+            "segments_indexed"
+        ],
+
+        "visual_frames_indexed": visual_result[
+            "frame_count"
+        ],
     }
 
 
 def format_timestamp(
-    seconds: float
+    seconds: float,
 ) -> str:
     seconds = max(
         0,
@@ -447,9 +482,11 @@ def format_timestamp(
     )
 
     hours = seconds // 3600
+
     minutes = (
         seconds % 3600
     ) // 60
+
     secs = seconds % 60
 
     if hours > 0:
